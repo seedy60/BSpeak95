@@ -88,7 +88,7 @@ Now all that's left to do is configure your DOS emulator or virtual machine to u
 
 1. [Download the latest BSpeak95 release](https://github.com/seedy60/BSpeak95/releases/latest/download/BSpeak95.zip).
 2. Extract the zip file to a location of your choice.
-3. Run the speech.cmd file and choose a SAPI 5 voice from the menu. The included speech.cmd file will start the emulator listening on COM8.
+3. Run the speech.cmd file and choose a SAPI 5 voice from the menu, or hit 0 to use your host-side screen reader. The included speech.cmd file will start the emulator listening on COM8.
 
 ## Adjusting rate, pitch and volume
 
