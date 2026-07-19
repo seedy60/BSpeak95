@@ -61,7 +61,7 @@ On modern versions of Windows 10 and 11, device drivers, even known safe drivers
 
 We can get around this not by disabling security features, but deceiving them. A convenient registry file is provided in this repo to help with this. Simply run the file called SystemUpgradeLie.reg, answer yes to the prompts and restart the PC. In simple terms, we're using a loophole where the driver signing rules don't apply if the version of Windows 10 or 11 you're using now is an upgrade from a prior version of Windows, like 7 or 8.1.
 
-## Running from source
+### Running from source
 
 1. Press Windows + R, type cmd and press Enter.
 2. Clone the repo.
