@@ -38,6 +38,22 @@ You will need a pair of linked virtual serial ports so the screen reader and BSp
 2. Extract the zip file to a location of your choice.
 3. Run the setup file relative to your system; x64 for a 64-bit system, x86 for a 32-bit system.
 4. During installation, a Windows security dialog will appear asking if you trust the driver you're installing. This dialog doesn't take focus automatically, so you will have to find it with Alt Tab. Check the box to always trust software from the developer and click install.
+5. Run the Com0Com setup tool as an admin. Press Windows + R to open the run box and type one of the following paths.
+    * 64-bit systems:
+        ```
+        %programfiles(x86%\com0com\setupc.exe
+        ```
+    * 32-bit systems:
+        ```
+        %programfiles%\com0com\setupc.exe
+        ```
+    
+7. Run the following commands to add our 2 serial ports.
+    ```
+    change CNCA0 PortName=COM8
+    change CNCB0 PortName=COM9
+    ```
+8. Finally, Control C out of the setup terminal.
 
 #### The modern Windows driver signing problem
 
