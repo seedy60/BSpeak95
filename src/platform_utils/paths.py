@@ -33,8 +33,7 @@ def embedded_data_path():
 
 def is_frozen():
 	"""Return a bool indicating if application is compressed"""
-	import imp
-	return hasattr(sys, 'frozen') or imp.is_frozen("__main__")
+	return hasattr(sys, 'frozen')
 
 def get_executable():
 	"""Returns the full executable path/name if frozen, or the full path/name of the main module if not."""

@@ -1,0 +1,13 @@
+[project]
+name = "vbns-ao2"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "accessible-output2==0.16",
+    "configobj>=5.0.9",
+    "markdown>=3.10.2",
+    "prismatoid>=0.17.3",
+    "pyserial>=3.5",
+    "pywin32>=312",
+    "winpaths>=0.2",
+]

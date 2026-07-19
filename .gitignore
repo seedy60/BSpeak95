@@ -4,3 +4,5 @@
 src/build
 src/dist
 src/*.zip
+# Diagnostic serial captures (VBNS_RAWLOG)
+raw.bin

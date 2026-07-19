@@ -1,5 +1,7 @@
+accessible_output2==0.16
+configobj
 Markdown
+prismatoid
 pyserial
 pywin32
-py2exe-py2
 winpaths
