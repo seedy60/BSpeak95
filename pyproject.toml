@@ -7,6 +7,7 @@ dependencies = [
     "configobj>=5.0.9",
     "markdown>=3.10.2",
     "prismatoid>=0.17.3",
+    "pyinstaller>=6.21.0",
     "pyserial>=3.5",
     "pywin32>=312",
     "winpaths>=0.2",

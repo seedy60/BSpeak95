@@ -75,8 +75,24 @@ class WAVEOUTCAPS(Structure):
 		('dwSupport', DWORD),
 	]
 
-	# Set argument types.
-winmm.waveOutOpen.argtypes = (LPHWAVEOUT, UINT, LPWAVEFORMATEX, DWORD, DWORD, DWORD)
+	# Set argument types. HWAVEOUT/HANDLE are pointer-sized (c_void_p); without
+	# these, ctypes marshals the 64-bit wave/event handles as a 32-bit int and
+	# raises "OverflowError: int too long to convert".
+# dwCallback here carries the event HANDLE (CALLBACK_EVENT) and dwInstance is a
+# pointer-sized value; both must be pointer-width or the 64-bit event handle is
+# truncated and waveOut signals a handle that never matches the one sync() waits
+# on -- a deadlock.
+winmm.waveOutOpen.argtypes = (LPHWAVEOUT, UINT, LPWAVEFORMATEX, HANDLE, c_void_p, DWORD)
+winmm.waveOutPrepareHeader.argtypes = (HWAVEOUT, LPWAVEHDR, UINT)
+winmm.waveOutWrite.argtypes = (HWAVEOUT, LPWAVEHDR, UINT)
+winmm.waveOutUnprepareHeader.argtypes = (HWAVEOUT, LPWAVEHDR, UINT)
+winmm.waveOutPause.argtypes = (HWAVEOUT,)
+winmm.waveOutRestart.argtypes = (HWAVEOUT,)
+winmm.waveOutReset.argtypes = (HWAVEOUT,)
+winmm.waveOutClose.argtypes = (HWAVEOUT,)
+kernel32.CreateEventW.restype = HANDLE
+kernel32.WaitForSingleObject.argtypes = (HANDLE, DWORD)
+kernel32.CloseHandle.argtypes = (HANDLE,)
 
 # Initialize error checking.
 def _winmm_errcheck(res, func, args):
@@ -117,13 +133,17 @@ class WavePlayer(object):
 		self.channels=channels
 		self.samplesPerSec=samplesPerSec
 		self.bitsPerSample=bitsPerSample
-		if isinstance(outputDevice, basestring):
+		if isinstance(outputDevice, str):
 			outputDevice = outputDeviceNameToID(outputDevice, True)
 		self.outputDeviceID = outputDevice
 		#: If C{True}, close the output device when no audio is being played.
 		#: @type: bool
 		self.closeWhenIdle = closeWhenIdle
 		self._waveout = None
+		# Keeps the most recent buffer's bytes alive while the device is still
+		# reading them; whdr.lpData is only a raw pointer, so without this the
+		# data is freed mid-playback, producing glitchy, stop-start audio.
+		self._prev_data = None
 		self._waveout_event = kernel32.CreateEventW(None, False, False, None)
 		self._waveout_lock = threading.RLock()
 		self._lock = threading.RLock()
@@ -142,11 +162,14 @@ class WavePlayer(object):
 			wfx.nChannels = self.channels
 			wfx.nSamplesPerSec = self.samplesPerSec
 			wfx.wBitsPerSample = self.bitsPerSample
-			wfx.nBlockAlign = self.bitsPerSample / 8 * self.channels
+			wfx.nBlockAlign = self.bitsPerSample // 8 * self.channels
 			wfx.nAvgBytesPerSec = self.samplesPerSec * wfx.nBlockAlign
 			waveout = HWAVEOUT(0)
 			with self._global_waveout_lock:
-				winmm.waveOutOpen(byref(waveout), self.outputDeviceID, LPWAVEFORMATEX(wfx), self._waveout_event, 0, CALLBACK_EVENT)
+				# CALLBACK_NULL: no completion event. sync() polls WHDR_DONE
+				# instead, because the CALLBACK_EVENT signal is unreliable on some
+				# systems (it never arrives), which hung playback after buffer 1.
+				winmm.waveOutOpen(byref(waveout), self.outputDeviceID, LPWAVEFORMATEX(wfx), None, None, CALLBACK_NULL)
 			self._waveout = waveout.value
 			self._prev_whdr = None
 
@@ -172,11 +195,12 @@ class WavePlayer(object):
 				try:
 					with self._global_waveout_lock:
 						winmm.waveOutWrite(self._waveout, LPWAVEHDR(whdr), sizeof(WAVEHDR))
-				except WindowsError, e:
+				except WindowsError as e:
 					self.close()
 					raise e
 			self.sync()
 			self._prev_whdr = whdr
+			self._prev_data = data
 
 	def sync(self):
 		"""Synchronise with playback.
@@ -187,8 +211,17 @@ class WavePlayer(object):
 			if not self._prev_whdr:
 				return
 			assert self._waveout, "waveOut None before wait"
+			# Poll the buffer-done flag rather than waiting on a completion event.
+			# The event (CALLBACK_EVENT) never fires on some systems, deadlocking
+			# playback; the driver still sets WHDR_DONE. The timeout (buffer length
+			# plus a margin) guarantees we never block forever.
+			maxWait = (self._prev_whdr.dwBufferLength /
+				float(self.samplesPerSec * self.channels * (self.bitsPerSample // 8))) + 1.0
+			deadline = time.time() + maxWait
 			while not (self._prev_whdr.dwFlags & WHDR_DONE):
-				kernel32.WaitForSingleObject(self._waveout_event, INFINITE)
+				if time.time() > deadline:
+					break
+				time.sleep(0.005)
 			with self._waveout_lock:
 				assert self._waveout, "waveOut None after wait"
 				with self._global_waveout_lock:
@@ -270,7 +303,7 @@ class WavePlayer(object):
 
 def _getOutputDevices():
 	caps = WAVEOUTCAPS()
-	for devID in xrange(-1, winmm.waveOutGetNumDevs()):
+	for devID in range(-1, winmm.waveOutGetNumDevs()):
 		try:
 			winmm.waveOutGetDevCapsW(devID, byref(caps), sizeof(caps))
 			yield devID, caps.szPname

@@ -14,10 +14,14 @@ except ImportError:
 	import queue # Python 3 import
 from ctypes import *
 import os
+import sys
 import codecs
 import platform
 isSpeaking = False
 lastIndex = None
+# Accumulates the current utterance's audio so it can be played as a single
+# buffer; playing eSpeak's many small chunks separately gave stop-start audio.
+_audio = bytearray()
 bgThread=None
 bgQueue = None
 player = None
@@ -120,8 +124,10 @@ t_espeak_callback=CFUNCTYPE(c_int,POINTER(c_short),c_int,POINTER(espeak_EVENT))
 @t_espeak_callback
 def callback(wav,numsamples,event):
 	try:
-		global player, isSpeaking, lastIndex
+		global player, isSpeaking, lastIndex, _audio
+		log.debug("callback: numsamples=%d wav=%s isSpeaking=%s", numsamples, bool(wav), isSpeaking)
 		if not isSpeaking:
+			log.debug("callback: abort (isSpeaking is False)")
 			return 1
 		for e in event:
 			if e.type==espeakEVENT_MARK:
@@ -129,14 +135,19 @@ def callback(wav,numsamples,event):
 			elif e.type==espeakEVENT_LIST_TERMINATED:
 				break
 		if not wav:
+			# End of utterance: play everything as one buffer, so there are no
+			# gaps between eSpeak's small chunks (which caused stop-start audio).
+			log.debug("callback: end of speech, playing %d bytes", len(_audio))
+			if _audio:
+				try:
+					player.feed(bytes(_audio))
+				except:
+					log.error("Error feeding audio to nvWave",exc_info=True)
 			player.idle()
 			isSpeaking = False
 			return 0
 		if numsamples > 0:
-			try:
-				player.feed(string_at(wav, numsamples * sizeof(c_short)))
-			except:
-				log.debug("Error feeding audio to nvWave",exc_info=True)
+			_audio += string_at(wav, numsamples * sizeof(c_short))
 		return 0
 	except:
 		log.error("callback", exc_info=True)
@@ -170,13 +181,17 @@ def _execWhenDone(func, *args, **kwargs):
 		func(*args, **kwargs)
 
 def _speak(text):
-	global isSpeaking
+	global isSpeaking, _audio
 	uniqueID=c_int()
 	isSpeaking = True
+	_audio = bytearray()  # fresh accumulator for this utterance
 	# eSpeak can only process compound emojis  when using a UTF8 encoding
 	text=text.encode('utf8',errors='ignore')
+	log.debug("_speak: %r", text)
 	flags = espeakCHARS_UTF8 | espeakSSML | espeakPHONEMES
-	return espeakDLL.espeak_Synth(text,0,0,0,0,flags,byref(uniqueID),0)
+	res = espeakDLL.espeak_Synth(text,0,0,0,0,flags,byref(uniqueID),0)
+	log.debug("_speak: espeak_Synth returned %r", res)
+	return res
 
 def speak(text):
 	global bgQueue
@@ -232,6 +247,8 @@ def setVoice(voice):
 	setVoiceByName(voice.identifier)
 
 def setVoiceByName(name):
+	if isinstance(name, str):
+		name = name.encode("mbcs")
 	_execWhenDone(espeakDLL.espeak_SetVoiceByName,name)
 
 def _setVoiceAndVariant(voice=None, variant=None):
@@ -274,10 +291,17 @@ def espeak_errcheck(res, func, args):
 
 def initialize():
 	global espeakDLL, bgThread, bgQueue, player
+	# Set VBNS_ESPEAKLOG=<path> to trace the eSpeak speech/audio path.
+	if os.environ.get("VBNS_ESPEAKLOG"):
+		log.basicConfig(filename=os.environ["VBNS_ESPEAKLOG"], level=log.DEBUG, force=True)
+		log.debug("espeak initialize")
+	# When frozen by PyInstaller the DLLs and espeak-ng-data live next to the
+	# bundled files (sys._MEIPASS); from source they sit beside this module.
+	base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 	if platform.architecture()[0][:2] == "64":
-		espeakDLL=cdll.LoadLibrary(r"espeak64.dll")
+		espeakDLL=cdll.LoadLibrary(os.path.join(base, "espeak64.dll"))
 	else:
-		espeakDLL=cdll.LoadLibrary(r"espeak.dll")
+		espeakDLL=cdll.LoadLibrary(os.path.join(base, "espeak.dll"))
 	espeakDLL.espeak_Info.restype=c_char_p
 	espeakDLL.espeak_Synth.errcheck=espeak_errcheck
 	espeakDLL.espeak_SetVoiceByName.errcheck=espeak_errcheck
@@ -287,10 +311,18 @@ def initialize():
 	espeakDLL.espeak_ListVoices.restype=POINTER(POINTER(espeak_VOICE))
 	espeakDLL.espeak_GetCurrentVoice.restype=POINTER(espeak_VOICE)
 	espeakDLL.espeak_SetVoiceByName.argtypes=(c_char_p,)
-	sampleRate=espeakDLL.espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS,300, ".", 0)
+	# The path must be passed as bytes with an explicit argtype; an unprototyped
+	# str is silently dropped and espeak falls back to a compiled-in default,
+	# which is what caused "Error processing file '.\\phontab'". `base` is the
+	# directory that contains espeak-ng-data.
+	espeakDLL.espeak_Initialize.argtypes=(c_int, c_int, c_char_p, c_int)
+	sampleRate=espeakDLL.espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS,300, base.encode("mbcs"), 0)
 	if sampleRate<0:
 		raise OSError("espeak_Initialize %d"%sampleRate)
-	player = nvwave.WavePlayer(channels=1, samplesPerSec=sampleRate, bitsPerSample=16)
+	# closeWhenIdle=False keeps the wave device open between utterances. Every
+	# incoming utterance is preceded by a cancel, and the close/reopen churn that
+	# caused was leaving nothing audible after the first phrase.
+	player = nvwave.WavePlayer(channels=1, samplesPerSec=sampleRate, bitsPerSample=16, closeWhenIdle=False)
 	espeakDLL.espeak_SetSynthCallback(callback)
 	bgQueue = queue.Queue()
 	bgThread=BgThread()

@@ -4,5 +4,11 @@
 src/build
 src/dist
 src/*.zip
-# Diagnostic serial captures (VBNS_RAWLOG)
+# Diagnostic serial captures (VBNS_RAWLOG) and espeak logs (VBNS_ESPEAKLOG)
 raw.bin
+es.log
+# PyInstaller build output and generated files
+/build/
+/dist/
+*.spec
+vdata.txt
