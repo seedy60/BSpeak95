@@ -50,7 +50,7 @@ We can get around this not by disabling security features, but deceiving them. A
 1. Press Windows + R, type cmd and press Enter.
 2. Clone the repo.
     ```
-    git clone https://github.com/seedy60/vbns-ao2
+    git clone https://github.com/seedy60/BSpeak95
     ```
 3. Install UV.
     ```
