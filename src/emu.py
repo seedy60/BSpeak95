@@ -34,15 +34,21 @@ in_command = False
 cmd_letter = None
 num=""
 lst=[]
+# Count of commands applied in the current message (reset at each CR). Used to
+# tell a standalone volume command (the real, user-set level) from a volume that
+# is bundled inside JAWS's voice-reset triple (rate+volume+pitch), whose low
+# value would otherwise duck the voice -- see volume().
+commands_this_message=0
 stopped=True
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 def finish_command():
- # Apply the command accumulated since the last cmdchar, then clear the
- # command state. Values are consumed here so they never leak into the spoken
- # text. Handles both command orders (see parse): letter-first cmdchar+R+2 and
+ # Apply the command accumulated since the last cmdchar, then clear the command
+ # state. Values are consumed here so they never leak into the spoken text.
+ # Handles both command orders (see parse): letter-first cmdchar+R+2 and
  # number-first cmdchar+5+E.
- global in_command, cmd_letter, num
+ global in_command, cmd_letter, num, commands_this_message
  if cmd_letter in handlers and num != "" and num.isdigit():
+  commands_this_message += 1
   handlers[cmd_letter](int(num))
  in_command = False
  cmd_letter = None
@@ -112,19 +118,29 @@ def pitch(x):
  else:
   tts.set_pitch(pitch_map[x])
 def volume(x):
+ # JAWS sends volume two ways: as a standalone command in its own message (the
+ # real, user-set level, e.g. cmdchar 16 V), and bundled inside its per-utterance
+ # voice-reset cmdchar 6 E, cmdchar 5 V, cmdchar 24 P (rate+volume+pitch), whose
+ # low value isn't always restored and ducked the voice -- notably after
+ # capitals. Apply volume only when it is the sole command of the message; ignore
+ # it when other commands share the message (the reset). This keeps deliberate
+ # volume changes working without the capital duck.
+ if commands_this_message != 1:
+  return
  x = max(0, min(x, len(volume_map) - 1))
  if cmd.args.espeak != "":
   synth.set_volume(volume_map[x])
  else:
   tts.set_volume(volume_map[x])
 def reset():
- global buffer, lst, in_command, num, cmd_letter
+ global buffer, lst, in_command, num, cmd_letter, commands_this_message
  buffer.seek(0)
  buffer.truncate()
  lst = []
  num=""
  in_command=False
  cmd_letter=None
+ commands_this_message=0
 handlers = {
 'R': speed,   # rate (BrailleMate / Window-Eyes)
 'E': speed,   # rate (legacy alias)
